@@ -13,7 +13,7 @@ export const MOCK_COURSES: Course[] = [
   {
     id: 'c1',
     title: 'Pro Course (Content Updated up to Batch 11)',
-    instructor: 'ঝংকার মাহবুব',
+    instructor: 'Web Development',
     thumbnail: 'https://i.ibb.co/L89Z9D9/course-thumb.png',
     modules: [
       {

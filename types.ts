@@ -56,7 +56,8 @@ export enum View {
   REVIEWS = 'reviews',
   QUIZZES = 'quizzes',
   ORDERS = 'orders',
-  SETTINGS = 'settings'
+  SETTINGS = 'settings',
+  ADMIN = 'admin'
 }
 
 export interface Certificate {
