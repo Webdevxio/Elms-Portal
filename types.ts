@@ -42,12 +42,33 @@ export interface Course {
   instructor: string;
   thumbnail: string;
   modules: Module[];
+  price?: string;
+  category?: string;
 }
 
 export enum View {
   DASHBOARD = 'dashboard',
   PLAYER = 'player',
   PROFILE = 'profile',
-  OUTLINE = 'outline',
-  ADMIN = 'admin'
+  ENROLLED = 'enrolled',
+  CERTIFICATES = 'certificates',
+  WISHLIST = 'wishlist',
+  REVIEWS = 'reviews',
+  QUIZZES = 'quizzes',
+  ORDERS = 'orders',
+  SETTINGS = 'settings'
+}
+
+export interface Certificate {
+  id: string;
+  courseTitle: string;
+  date: string;
+}
+
+export interface Order {
+  id: string;
+  title: string;
+  date: string;
+  amount: string;
+  status: 'Paid' | 'Pending';
 }

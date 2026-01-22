@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { View, Course, Module, ModuleItem, User, ItemType } from './types';
+import { View, Course, Module, ModuleItem, User, ItemType, Certificate, Order } from './types';
 import { MOCK_COURSES, INITIAL_USER } from './constants';
-import Sidebar from './components/Sidebar';
+import { generateLessonSummary } from './services/geminiService';
 
 type AuthScreen = 'login' | 'signup';
 
@@ -19,51 +19,28 @@ const App: React.FC = () => {
   const [signupName, setSignupName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
   // --- APP CONTENT STATE ---
-  const [courses, setCourses] = useState<Course[]>(MOCK_COURSES);
   const [currentView, setCurrentView] = useState<View>(View.DASHBOARD);
-  const [selectedCourse, setSelectedCourse] = useState<Course>(courses[0]);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [activeItem, setActiveItem] = useState<ModuleItem | null>(null);
-
-  // --- ADMIN TOOLS STATE ---
-  const [adminTargetCourse, setAdminTargetCourse] = useState<string>(courses[0].id);
-  const [adminTargetModule, setAdminTargetModule] = useState<string>('');
-  const [newItem, setNewItem] = useState<{title: string, type: ItemType, content: string, duration: string}>({
-    title: '', type: 'video', content: '', duration: ''
-  });
-  const [newModuleTitle, setNewModuleTitle] = useState('');
+  const [aiSummary, setAiSummary] = useState<string>('');
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
 
   // --- PERSISTENCE LAYER ---
   useEffect(() => {
-    const savedUsers = localStorage.getItem('lumina_database_users');
-    const savedCourses = localStorage.getItem('lumina_courses');
-    const savedSession = localStorage.getItem('lumina_active_user');
-    const savedAuth = localStorage.getItem('lumina_isLoggedIn');
+    const savedUsers = localStorage.getItem('dreams_database_users');
+    const savedSession = localStorage.getItem('dreams_active_user');
+    const savedAuth = localStorage.getItem('dreams_isLoggedIn');
     
-    // Seed Admin if database is empty
     let usersList = savedUsers ? JSON.parse(savedUsers) : [];
-    const adminExists = usersList.some((u: any) => u.email === 'jawad.khan@dev.com');
-    
-    if (!adminExists) {
-      const adminUser = {
-        name: 'Jawad Khan',
-        email: 'jawad.khan@dev.com',
-        password: '112233',
-        role: 'admin',
-        avatar: INITIAL_USER.avatar
-      };
-      usersList.push(adminUser);
-      localStorage.setItem('lumina_database_users', JSON.stringify(usersList));
+    if (!usersList.some((u: any) => u.email === 'jawad.khan@dev.com')) {
+      usersList.push({ ...INITIAL_USER, password: '112233' });
+      localStorage.setItem('dreams_database_users', JSON.stringify(usersList));
     }
     setRegisteredUsers(usersList);
-
-    if (savedCourses) {
-      const parsedCourses = JSON.parse(savedCourses);
-      setCourses(parsedCourses);
-      setSelectedCourse(parsedCourses[0]);
-    }
 
     if (savedAuth === 'true' && savedSession) {
       setUser(JSON.parse(savedSession));
@@ -72,502 +49,364 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('lumina_courses', JSON.stringify(courses));
     if (isLoggedIn) {
-      localStorage.setItem('lumina_isLoggedIn', 'true');
-      localStorage.setItem('lumina_active_user', JSON.stringify(user));
+      localStorage.setItem('dreams_isLoggedIn', 'true');
+      localStorage.setItem('dreams_active_user', JSON.stringify(user));
     } else {
-      localStorage.removeItem('lumina_isLoggedIn');
-      localStorage.removeItem('lumina_active_user');
+      localStorage.removeItem('dreams_isLoggedIn');
+      localStorage.removeItem('dreams_active_user');
     }
-  }, [user, courses, isLoggedIn]);
+  }, [user, isLoggedIn]);
 
-  // --- AUTH ACTIONS ---
   const handleSignup = (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
-    
-    if (!signupName || !signupEmail || !signupPassword) {
-      setAuthError('All fields are required.');
-      return;
-    }
-
-    if (registeredUsers.some(u => u.email === signupEmail)) {
-      setAuthError('This email is already registered.');
-      return;
-    }
-
-    const newUser = {
-      name: signupName,
-      email: signupEmail,
-      password: signupPassword,
-      role: 'student',
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${signupName}`
-    };
-
+    if (!signupName || !signupEmail || !signupPassword) return setAuthError('All fields required.');
+    if (signupPassword !== confirmPassword) return setAuthError('Passwords mismatch.');
+    const newUser = { name: signupName, email: signupEmail, password: signupPassword, role: 'student', avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${signupName}` };
     const updatedUsers = [...registeredUsers, newUser];
     setRegisteredUsers(updatedUsers);
-    localStorage.setItem('lumina_database_users', JSON.stringify(updatedUsers));
-    
-    // Auto-login after signup
-    setUser({
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role as 'student' | 'admin',
-      phone: '',
-      avatar: newUser.avatar
-    });
+    localStorage.setItem('dreams_database_users', JSON.stringify(updatedUsers));
+    setUser({ ...newUser, role: 'student', phone: '' });
     setIsLoggedIn(true);
   };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
-
     const foundUser = registeredUsers.find(u => u.email === loginEmail && u.password === loginPassword);
-
     if (foundUser) {
-      setUser({
-        name: foundUser.name,
-        email: foundUser.email,
-        role: foundUser.role as 'student' | 'admin',
-        phone: foundUser.phone || '',
-        avatar: foundUser.avatar
-      });
+      setUser({ ...foundUser, role: foundUser.role, phone: foundUser.phone || '' });
       setIsLoggedIn(true);
     } else {
-      setAuthError('Invalid email or password. Please try again.');
+      setAuthError('Invalid email or password.');
     }
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
     setCurrentView(View.DASHBOARD);
-    setActiveItem(null);
-    setAuthScreen('login');
+    setSelectedCourse(null);
   };
 
-  // --- ADMIN ACTIONS ---
-  const handleAddModule = () => {
-    if (!newModuleTitle.trim()) return;
-    const updatedCourses = courses.map(c => {
-      if (c.id === adminTargetCourse) {
-        return {
-          ...c,
-          modules: [...c.modules, { 
-            id: `m-${Date.now()}`, 
-            title: newModuleTitle, 
-            items: [] 
-          }]
-        };
-      }
-      return c;
-    });
-    setCourses(updatedCourses);
-    setNewModuleTitle('');
+  const handleViewCourse = (course: Course) => {
+    setSelectedCourse(course);
+    setActiveItem(course.modules[0]?.items[0] || null);
+    setCurrentView(View.PLAYER);
   };
 
-  const handleAddItem = () => {
-    if (!newItem.title || !newItem.content || !adminTargetModule) return;
-    const updatedCourses = courses.map(c => {
-      if (c.id === adminTargetCourse) {
-        return {
-          ...c,
-          modules: c.modules.map(m => {
-            if (m.id === adminTargetModule) {
-              return {
-                ...m,
-                items: [...m.items, {
-                  id: `i-${Date.now()}`,
-                  ...newItem,
-                  isCompleted: false
-                }]
-              };
-            }
-            return m;
-          })
-        };
-      }
-      return c;
-    });
-    setCourses(updatedCourses);
-    setNewItem({ title: '', type: 'video', content: '', duration: '' });
-    alert("Content Published!");
+  const handleGetAiSummary = async () => {
+    if (!activeItem) return;
+    setIsLoadingSummary(true);
+    const summary = await generateLessonSummary(activeItem.title + ": " + activeItem.content);
+    setAiSummary(summary);
+    setIsLoadingSummary(false);
   };
 
-  // --- HELPERS ---
-  const getEmbedUrl = (url: string) => {
-    if (url.includes('youtube.com/watch?v=')) return url.replace('watch?v=', 'embed/');
-    if (url.includes('youtu.be/')) return url.replace('youtu.be/', 'youtube.com/embed/');
-    return url;
-  };
-
-  const calculateProgress = (course: Course) => {
-    const flat = course.modules.flatMap(m => m.items);
-    if (flat.length === 0) return 0;
-    const completed = flat.filter(i => i.isCompleted).length;
-    return Math.round((completed / flat.length) * 100);
-  };
-
-  const toggleComplete = (itemId: string) => {
-    const updatedCourses = courses.map(c => ({
-      ...c,
-      modules: c.modules.map(m => ({
-        ...m,
-        items: m.items.map(i => i.id === itemId ? { ...i, isCompleted: !i.isCompleted } : i)
-      }))
-    }));
-    setCourses(updatedCourses);
-    const updatedCourse = updatedCourses.find(c => c.id === selectedCourse.id)!;
-    setSelectedCourse(updatedCourse);
-  };
+  const Logo = ({ light = false }: { light?: boolean }) => (
+    <div className="flex items-center gap-2">
+      <div className={`w-8 h-8 ${light ? 'bg-white' : 'bg-[#2d1b69]'} rounded-lg flex items-center justify-center`}>
+         <svg className={`w-5 h-5 ${light ? 'text-[#2d1b69]' : 'text-white'}`} viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 3L1 9L12 15L21 10.09V17H23V9M5 13.18V17.18L12 21L19 17.18V13.18L12 17L5 13.18Z" />
+         </svg>
+      </div>
+      <span className={`text-2xl font-black ${light ? 'text-white' : 'text-[#2d1b69]'}`}>Dreams<span className="text-[#ff536a]">LMS</span></span>
+    </div>
+  );
 
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-[#050510] flex items-center justify-center p-6 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-purple-900/20 via-transparent to-transparent">
-        <div className="glass w-full max-w-md p-10 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#8b3dff] to-transparent opacity-50"></div>
-          
-          <div className="text-center mb-10">
-            <div className="w-20 h-20 bg-[#8b3dff] rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-purple-500/20 group hover:rotate-6 transition-transform">
-              <span className="text-white text-4xl font-black">L</span>
-            </div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">Lumina <span className="text-[#8b3dff]">Portal</span></h1>
-            <p className="text-slate-400 mt-2 text-sm">Empowering the next generation of creators</p>
+      <div className="min-h-screen flex flex-col lg:flex-row bg-white">
+        <div className="hidden lg:flex flex-1 bg-[#FFF5F6] flex-col items-center justify-center p-12 text-center">
+          <div className="relative w-full max-w-lg mb-12">
+            <div className="bg-white rounded-full w-96 h-96 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-60"></div>
+            <img src="https://img.freepik.com/free-vector/learning-concept-illustration_114360-6186.jpg" alt="Edu" className="relative z-10 w-full" />
           </div>
-
-          <div className="flex bg-[#10101f] p-1 rounded-2xl mb-8 border border-white/5">
-            <button 
-              onClick={() => { setAuthScreen('login'); setAuthError(''); }}
-              className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${authScreen === 'login' ? 'bg-[#8b3dff] text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
-            >
-              Sign In
-            </button>
-            <button 
-              onClick={() => { setAuthScreen('signup'); setAuthError(''); }}
-              className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${authScreen === 'signup' ? 'bg-[#8b3dff] text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}
-            >
-              Create Account
-            </button>
-          </div>
-
-          <form onSubmit={authScreen === 'login' ? handleLogin : handleSignup} className="space-y-4">
-            {authScreen === 'signup' && (
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-2">Full Name</label>
-                <input 
-                  type="text" 
-                  placeholder="Enter your name" 
-                  value={signupName}
-                  onChange={(e) => setSignupName(e.target.value)}
-                  className="w-full bg-[#15152a] border border-white/5 rounded-2xl px-5 py-4 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[#8b3dff] transition-all" 
-                />
-              </div>
+          <h2 className="text-3xl font-extrabold text-[#2d1b69] mb-4">Welcome to <br /> DreamsLMS Courses.</h2>
+        </div>
+        <div className="flex-1 flex flex-col px-6 py-8 md:px-20 lg:px-24">
+          <div className="flex justify-between items-center mb-12"><Logo /></div>
+          <div className="max-w-md w-full mx-auto my-auto">
+            {authScreen === 'login' ? (
+              <form onSubmit={handleLogin} className="space-y-5">
+                <h1 className="text-3xl font-extrabold text-gray-900">Sign into Your Account</h1>
+                <input type="email" required value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} className="w-full bg-white text-black border border-gray-200 rounded-xl px-4 py-3.5 outline-none focus:border-[#ff536a]" placeholder="Email" />
+                <input type="password" required value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full bg-white text-black border border-gray-200 rounded-xl px-4 py-3.5 outline-none focus:border-[#ff536a]" placeholder="Password" />
+                {authError && <div className="text-red-600 text-xs font-bold">{authError}</div>}
+                <button type="submit" className="w-full py-4 bg-[#ff536a] text-white rounded-xl font-bold hover:bg-[#ff3b55] transition shadow-lg">Login</button>
+              </form>
+            ) : (
+              <form onSubmit={handleSignup} className="space-y-4">
+                <h1 className="text-3xl font-extrabold text-gray-900">Sign Up</h1>
+                <input type="text" required value={signupName} onChange={(e) => setSignupName(e.target.value)} className="w-full bg-white text-black border border-gray-200 rounded-xl px-4 py-3.5 outline-none focus:border-[#ff536a]" placeholder="Full Name" />
+                <input type="email" required value={signupEmail} onChange={(e) => setSignupEmail(e.target.value)} className="w-full bg-white text-black border border-gray-200 rounded-xl px-4 py-3.5 outline-none focus:border-[#ff536a]" placeholder="Email" />
+                <input type="password" required value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)} className="w-full bg-white text-black border border-gray-200 rounded-xl px-4 py-3.5 outline-none focus:border-[#ff536a]" placeholder="Password" />
+                <input type="password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full bg-white text-black border border-gray-200 rounded-xl px-4 py-3.5 outline-none focus:border-[#ff536a]" placeholder="Confirm Password" />
+                {authError && <div className="text-red-600 text-xs font-bold">{authError}</div>}
+                <button type="submit" className="w-full py-4 bg-[#ff536a] text-white rounded-xl font-bold hover:bg-[#ff3b55] transition shadow-lg">Sign Up</button>
+              </form>
             )}
-            
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-2">Email Address</label>
-              <input 
-                type="email" 
-                placeholder="email@example.com" 
-                value={authScreen === 'login' ? loginEmail : signupEmail}
-                onChange={(e) => authScreen === 'login' ? setLoginEmail(e.target.value) : setSignupEmail(e.target.value)}
-                className="w-full bg-[#15152a] border border-white/5 rounded-2xl px-5 py-4 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[#8b3dff] transition-all" 
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] px-2">Password</label>
-              <input 
-                type="password" 
-                placeholder="••••••••" 
-                value={authScreen === 'login' ? loginPassword : signupPassword}
-                onChange={(e) => authScreen === 'login' ? setLoginPassword(e.target.value) : setSignupPassword(e.target.value)}
-                className="w-full bg-[#15152a] border border-white/5 rounded-2xl px-5 py-4 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[#8b3dff] transition-all" 
-              />
-            </div>
-
-            {authError && (
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs py-3 px-4 rounded-xl flex items-center gap-2">
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-                {authError}
-              </div>
-            )}
-
-            <button 
-              type="submit"
-              className="w-full py-5 bg-[#8b3dff] text-white rounded-2xl font-black hover:bg-[#7a2ff0] transition shadow-lg shadow-purple-900/40 uppercase tracking-widest text-xs"
-            >
-              {authScreen === 'login' ? 'Proceed to Learning' : 'Initialize Account'}
-            </button>
-          </form>
-
-          {authScreen === 'login' && (
-            <p className="mt-6 text-center text-xs text-slate-500">
-              Forgot your credentials? Contact <span className="text-[#8b3dff] hover:underline cursor-pointer">Support</span>
+            <p className="text-center mt-6 text-sm text-gray-500 font-medium">
+              {authScreen === 'login' ? "Don't you have an account?" : "Already have an account?"}
+              <button onClick={() => setAuthScreen(authScreen === 'login' ? 'signup' : 'login')} className="text-[#ff536a] font-bold ml-1.5">{authScreen === 'login' ? 'Sign up' : 'Sign In'}</button>
             </p>
-          )}
+          </div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-[#050510] flex">
-      <Sidebar 
-        currentView={currentView} 
-        setView={setCurrentView} 
-        user={user} 
-        onLogout={handleLogout}
-      />
-      
-      <main className="flex-1 md:ml-64 p-6 md:p-12 overflow-y-auto h-screen custom-scrollbar">
-        {/* ADMIN VIEW */}
-        {currentView === View.ADMIN && user.role === 'admin' && (
-          <div className="max-w-6xl mx-auto space-y-12">
-            <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div>
-                <h1 className="text-4xl font-black text-white">Control <span className="text-[#8b3dff]">Center</span></h1>
-                <p className="text-slate-500 font-bold mt-1 uppercase tracking-widest text-xs">Simulated Backend Management</p>
-              </div>
-              <div className="flex items-center gap-4 bg-[#10101f] px-6 py-3 rounded-2xl border border-white/5">
-                <div className="w-2 h-2 rounded-full bg-[#00ffa3] animate-pulse"></div>
-                <span className="text-xs font-black text-white uppercase tracking-widest">Database Synced</span>
-              </div>
-            </header>
+  const renderSidebar = () => {
+    const menuItems = [
+      { id: View.DASHBOARD, label: 'Dashboard', icon: 'M4 6h16M4 12h16M4 18h16' },
+      { id: View.PROFILE, label: 'My Profile', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0z' },
+      { id: View.ENROLLED, label: 'Enrolled Courses', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13' },
+      { id: View.CERTIFICATES, label: 'My Certificates', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944' },
+      { id: View.WISHLIST, label: 'Wishlist', icon: 'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682' },
+      { id: View.REVIEWS, label: 'Reviews', icon: 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674' },
+      { id: View.QUIZZES, label: 'My Quiz Attempts', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2' },
+      { id: View.ORDERS, label: 'Order History', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293' },
+    ];
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="space-y-6">
-                <div className="bg-[#10101f] border border-white/5 rounded-[2rem] p-8 shadow-xl">
-                  <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6">Database Health</h3>
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400 font-bold">Registered Users</span>
-                      <span className="text-2xl font-black text-white">{registeredUsers.length}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400 font-bold">Total Courses</span>
-                      <span className="text-2xl font-black text-white">{courses.length}</span>
-                    </div>
-                  </div>
-                </div>
-                <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 bg-red-500/10 text-red-500 rounded-2xl font-bold border border-red-500/20 hover:bg-red-500/20 transition text-sm">
-                  Wipe Data Store
-                </button>
-              </div>
-
-              <div className="lg:col-span-2 space-y-8">
-                <div className="bg-[#10101f] border border-white/5 rounded-[2.5rem] p-10 shadow-2xl">
-                  <h2 className="text-xl font-black text-white mb-8 flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-[#8b3dff]/20 text-[#8b3dff] flex items-center justify-center text-sm">01</span>
-                    New Content Item
-                  </h2>
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest px-2">Module</label>
-                        <select 
-                          value={adminTargetModule}
-                          onChange={(e) => setAdminTargetModule(e.target.value)}
-                          className="w-full bg-[#15152a] border border-white/5 rounded-2xl px-6 py-4 text-white focus:outline-none focus:ring-2 focus:ring-[#8b3dff]"
-                        >
-                          <option value="">Select Target...</option>
-                          {courses.find(c => c.id === adminTargetCourse)?.modules.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
-                        </select>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest px-2">Type</label>
-                        <select 
-                          value={newItem.type}
-                          onChange={(e) => setNewItem({...newItem, type: e.target.value as ItemType})}
-                          className="w-full bg-[#15152a] border border-white/5 rounded-2xl px-6 py-4 text-white focus:outline-none focus:ring-2 focus:ring-[#8b3dff]"
-                        >
-                          <option value="video">Video</option>
-                          <option value="note">Document</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest px-2">Content URL / Markdown</label>
-                      <textarea 
-                        rows={3}
-                        value={newItem.content}
-                        onChange={(e) => setNewItem({...newItem, content: e.target.value})}
-                        placeholder="Paste link or write text here..."
-                        className="w-full bg-[#15152a] border border-white/5 rounded-2xl px-6 py-4 text-white focus:outline-none focus:ring-2 focus:ring-[#8b3dff]"
-                      />
-                    </div>
-                    <button onClick={handleAddItem} className="w-full py-5 bg-[#8b3dff] text-white rounded-2xl font-black hover:bg-[#7a2ff0] transition shadow-lg uppercase tracking-widest text-sm">
-                      Publish Update
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* DASHBOARD VIEW */}
-        {currentView === View.DASHBOARD && (
-          <div className="max-w-6xl mx-auto space-y-12">
-            <header>
-              <h1 className="text-3xl md:text-5xl font-extrabold text-white leading-tight">
-                Welcome Back, <span className="text-[#8b3dff] text-glow">{user.name.split(' ')[0]}</span>.
-              </h1>
-              <p className="text-slate-500 font-bold mt-2 uppercase tracking-[0.3em] text-[10px]">Your personalized learning matrix is ready</p>
-            </header>
-
-            {courses.map(course => (
-              <div key={course.id} className="bg-[#10101f] border border-white/5 rounded-[2.5rem] p-8 flex flex-col lg:flex-row gap-8 items-center group hover:bg-[#15152a] transition-all duration-500">
-                <div className="w-full lg:w-96 aspect-video bg-black rounded-3xl overflow-hidden relative shadow-2xl">
-                   <img src={course.thumbnail} alt="Course" className="w-full h-full object-cover opacity-60 group-hover:scale-105 transition duration-700" />
-                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
-                   <div className="absolute bottom-6 left-6">
-                     <span className="bg-[#8b3dff] text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">Premium Course</span>
-                   </div>
-                </div>
-                <div className="flex-1 space-y-6 w-full">
-                  <div>
-                    <h2 className="text-2xl md:text-3xl font-extrabold text-white group-hover:text-[#8b3dff] transition-colors">{course.title}</h2>
-                    <p className="text-slate-500 font-bold mt-1">Instructor: {course.instructor}</p>
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-500">
-                      <span>Curriculum Completion</span>
-                      <span className="text-white">{calculateProgress(course)}%</span>
-                    </div>
-                    <div className="w-full bg-[#1a1a2e] h-2 rounded-full overflow-hidden border border-white/5">
-                      <div 
-                        className="bg-[#8b3dff] h-full rounded-full shadow-[0_0_15px_rgba(139,61,255,0.4)] transition-all duration-1000 ease-out" 
-                        style={{ width: `${calculateProgress(course)}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                  <div className="flex gap-4">
-                    <button 
-                      onClick={() => {
-                        setSelectedCourse(course);
-                        const firstItem = course.modules[0].items[0];
-                        setActiveItem(firstItem);
-                        setCurrentView(View.PLAYER);
-                      }}
-                      className="px-8 py-4 bg-[#8b3dff] text-white rounded-2xl font-black hover:bg-[#7a2ff0] transition shadow-lg shadow-purple-900/40 uppercase tracking-widest text-xs"
-                    >
-                      Resume Learning
-                    </button>
-                  </div>
-                </div>
-              </div>
+    return (
+      <aside className="lg:col-span-3 space-y-8">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-6 border-b border-gray-50 bg-[#fff5f6]"><Logo /></div>
+          <div className="p-4 space-y-1">
+            {menuItems.map((item) => (
+              <button key={item.id} onClick={() => { setCurrentView(item.id); setSelectedCourse(null); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition ${currentView === item.id ? 'text-[#ff536a] bg-[#fff5f6]' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} /></svg>
+                {item.label}
+              </button>
             ))}
           </div>
-        )}
+          <div className="p-4 border-t border-gray-50">
+             <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold text-gray-500 hover:bg-gray-50 hover:text-gray-900">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1" /></svg>
+                Logout
+             </button>
+          </div>
+        </div>
+      </aside>
+    );
+  };
 
-        {/* PLAYER VIEW */}
-        {currentView === View.PLAYER && activeItem && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 h-full max-w-7xl mx-auto">
-            <div className="lg:col-span-3 space-y-6">
-               <div className="bg-[#0a0a1a] rounded-[2.5rem] aspect-video overflow-hidden border border-white/5 shadow-2xl">
-                  {activeItem.type === 'video' ? (
-                    <iframe 
-                      className="w-full h-full"
-                      src={getEmbedUrl(activeItem.content)}
-                      title={activeItem.title}
-                      frameBorder="0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    ></iframe>
-                  ) : (
-                    <div className="p-12 h-full bg-[#10101f] overflow-y-auto custom-scrollbar prose prose-invert max-w-none">
-                      <h2 className="text-3xl font-black text-white mb-6 uppercase tracking-tight">{activeItem.title}</h2>
-                      <div className="text-slate-400 leading-relaxed whitespace-pre-wrap font-medium">
-                        {activeItem.content}
-                      </div>
-                    </div>
-                  )}
+  const renderCourseGrid = (courseList: Course[], title: string) => (
+    <section className="space-y-6">
+      <h3 className="text-xl font-black text-gray-900">{title}</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        {courseList.map((course) => (
+          <div key={course.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group hover:shadow-xl transition-all">
+            <img src={course.thumbnail} className="w-full h-44 object-cover" alt={course.title} />
+            <div className="p-5 space-y-3">
+               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 bg-gray-50 px-2 py-1 rounded">{course.instructor}</span>
+               <h4 className="text-sm font-black text-gray-900 leading-tight group-hover:text-[#ff536a] transition">{course.title}</h4>
+               <div className="flex items-center justify-between pt-2">
+                 <span className="text-[#ff536a] font-black">{course.price || '$99'}</span>
+                 <button onClick={() => handleViewCourse(course)} className="text-xs font-black bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-[#ff536a] transition">View Course</button>
                </div>
-
-               <div className="bg-[#10101f] border border-white/5 rounded-[2.5rem] p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-xl">
-                  <div className="flex items-center space-x-6">
-                    <div className={`w-16 h-16 rounded-3xl flex items-center justify-center ${activeItem.type === 'video' ? 'bg-blue-500/10 text-blue-500' : 'bg-amber-500/10 text-amber-500'}`}>
-                      {activeItem.type === 'video' ? (
-                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                      ) : (
-                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="text-2xl font-black text-white">{activeItem.title}</h3>
-                      <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mt-1">{activeItem.type} • {activeItem.duration || 'Study Material'}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => toggleComplete(activeItem.id)} 
-                    className={`px-10 py-5 rounded-2xl font-black transition-all flex items-center gap-3 uppercase tracking-widest text-xs ${activeItem.isCompleted ? 'bg-[#00ffa3]/10 text-[#00ffa3] border border-[#00ffa3]/20' : 'bg-[#8b3dff] text-white shadow-lg hover:bg-[#7a2ff0]'}`}
-                  >
-                    {activeItem.isCompleted ? 'Completed' : 'Mark as Done'}
-                  </button>
-               </div>
-            </div>
-
-            <div className="bg-[#10101f] border border-white/5 rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl">
-              <div className="p-6 border-b border-white/5 bg-[#15152a]">
-                 <h4 className="font-black text-white uppercase text-[10px] tracking-[0.3em]">Course Structure</h4>
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-4">
-                 {selectedCourse.modules.map((module, mIdx) => (
-                   <div key={module.id}>
-                      <div className="px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-l-2 border-[#8b3dff]/30 ml-2 mb-2">
-                        {module.title}
-                      </div>
-                      <div className="space-y-1">
-                        {module.items.map(item => (
-                          <button 
-                            key={item.id} 
-                            onClick={() => setActiveItem(item)} 
-                            className={`w-full text-left p-4 rounded-2xl flex items-center gap-4 transition-all group ${activeItem.id === item.id ? 'bg-[#8b3dff] text-white shadow-xl' : 'hover:bg-[#1a1a2e] text-slate-500 hover:text-white'}`}
-                          >
-                            <div className={`w-5 h-5 rounded-lg border-2 flex-shrink-0 flex items-center justify-center transition-colors ${item.isCompleted ? 'bg-[#00ffa3] border-[#00ffa3] text-black' : activeItem.id === item.id ? 'border-white/50' : 'border-slate-800'}`}>
-                              {item.isCompleted && <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>}
-                            </div>
-                            <span className="text-sm font-bold truncate">{item.title}</span>
-                          </button>
-                        ))}
-                      </div>
-                   </div>
-                 ))}
-              </div>
             </div>
           </div>
-        )}
+        ))}
+      </div>
+    </section>
+  );
 
-        {/* PROFILE VIEW */}
-        {currentView === View.PROFILE && (
-          <div className="max-w-4xl mx-auto space-y-10">
-            <h1 className="text-4xl font-black text-white mb-4">Account <span className="text-[#8b3dff]">Matrix</span></h1>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="bg-[#10101f] border border-white/5 rounded-[2.5rem] p-10 shadow-2xl text-center">
-                 <div className="w-32 h-32 mx-auto rounded-[2.5rem] border-4 border-[#1a1a2e] shadow-xl overflow-hidden bg-[#15152a]">
-                    <img src={user.avatar} className="w-full h-full object-cover" alt="Avatar" />
-                 </div>
-                 <h2 className="text-xl font-bold text-white mt-6">{user.name}</h2>
-                 <p className="text-[#8b3dff] text-[10px] font-black uppercase tracking-widest mt-1">{user.role}</p>
+  const renderPlayer = () => {
+    if (!selectedCourse) return null;
+    return (
+      <div className="space-y-6 animate-in fade-in duration-500">
+        <div className="bg-black aspect-video rounded-3xl overflow-hidden shadow-2xl relative">
+          {activeItem?.type === 'video' ? (
+            <iframe 
+              className="w-full h-full" 
+              src={activeItem.content.replace('watch?v=', 'embed/')} 
+              allowFullScreen 
+              title={activeItem.title}
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center text-white bg-slate-900 p-12 text-center">
+              <svg className="w-16 h-16 mb-4 text-[#ff536a]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              <h2 className="text-2xl font-bold mb-4">{activeItem?.title}</h2>
+              <div className="max-w-xl text-gray-300 whitespace-pre-wrap text-left">{activeItem?.content}</div>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="lg:col-span-8 space-y-6">
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+              <div className="flex items-center justify-between mb-6">
+                <h1 className="text-2xl font-black text-gray-900">{activeItem?.title}</h1>
+                <button onClick={handleGetAiSummary} disabled={isLoadingSummary} className="px-6 py-2.5 bg-[#ff536a] text-white rounded-xl text-xs font-bold hover:bg-[#ff3b55] disabled:opacity-50 transition flex items-center gap-2">
+                  {isLoadingSummary ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71L12 2z" /></svg>}
+                  Generate AI Summary
+                </button>
               </div>
-              <div className="lg:col-span-2 bg-[#10101f] border border-white/5 rounded-[2.5rem] p-10 shadow-2xl space-y-8">
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-2">Display Name</label>
-                    <input type="text" value={user.name} disabled className="w-full bg-[#15152a] border border-white/5 rounded-2xl px-6 py-4 text-white opacity-50 cursor-not-allowed" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-2">Email Identity</label>
-                    <input type="email" value={user.email} disabled className="w-full bg-[#15152a] border border-white/5 rounded-2xl px-6 py-4 text-white opacity-50 cursor-not-allowed" />
+              {aiSummary && (
+                <div className="bg-blue-50 border border-blue-100 p-6 rounded-2xl mb-8 animate-in slide-in-from-top-4">
+                  <h4 className="text-blue-900 font-black text-sm mb-3 flex items-center gap-2"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M13 2L3 14h9v8l10-12h-9l1 8z" /></svg> AI Smart Summary</h4>
+                  <div className="text-blue-800 text-sm whitespace-pre-wrap font-medium">{aiSummary}</div>
+                </div>
+              )}
+              <div className="prose max-w-none text-gray-600 font-medium">This lesson covers important concepts in {selectedCourse.title}. Follow along carefully.</div>
+            </div>
+          </div>
+          <div className="lg:col-span-4 space-y-4">
+            <h3 className="text-lg font-black text-gray-900">Course Content</h3>
+            <div className="space-y-3">
+              {selectedCourse.modules.map(mod => (
+                <div key={mod.id} className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+                  <div className="p-4 bg-gray-50 border-b border-gray-100 font-black text-sm text-gray-700">{mod.title}</div>
+                  <div className="p-2 space-y-1">
+                    {mod.items.map(item => (
+                      <button key={item.id} onClick={() => { setActiveItem(item); setAiSummary(''); }} className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold transition flex items-center justify-between ${activeItem?.id === item.id ? 'bg-[#ff536a] text-white' : 'hover:bg-gray-50 text-gray-500'}`}>
+                        <span className="flex items-center gap-2">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.type === 'video' ? "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" : "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"} /></svg>
+                          {item.title}
+                        </span>
+                        {item.duration && <span className="opacity-60">{item.duration}</span>}
+                      </button>
+                    ))}
                   </div>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
-        )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderContent = () => {
+    switch (currentView) {
+      case View.DASHBOARD:
+        return (
+          <div className="space-y-8 animate-in fade-in duration-500">
+            <div className="blue-gradient rounded-3xl p-8 md:p-12 text-white flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden">
+               <div className="flex flex-col md:flex-row items-center gap-6 relative z-10">
+                 <img src={user.avatar} className="w-24 h-24 rounded-full border-4 border-white/20 shadow-xl" alt="Pfp" />
+                 <div className="text-center md:text-left"><h2 className="text-3xl font-black">{user.name}</h2><p className="text-blue-100 font-medium opacity-80">Student</p></div>
+               </div>
+               <div className="flex items-center gap-3 relative z-10">
+                 <button className="px-6 py-3 bg-white text-blue-600 rounded-xl font-bold text-sm hover:bg-gray-50 transition shadow-lg">Become Instructor</button>
+                 <button className="px-6 py-3 bg-[#ff536a] text-white rounded-xl font-bold text-sm hover:bg-[#ff3b55] transition shadow-lg">Dashboard</button>
+               </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[ { label: 'Enrolled Courses', val: '12', color: 'bg-blue-50 text-blue-600' }, { label: 'Active Courses', val: '03', color: 'bg-red-50 text-red-600' }, { label: 'Completed Courses', val: '10', color: 'bg-green-50 text-green-600' } ].map((stat) => (
+                <div key={stat.label} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-5">
+                  <div className={`w-14 h-14 rounded-2xl ${stat.color} flex items-center justify-center font-black text-xl`}>{stat.val}</div>
+                  <p className="text-gray-400 text-sm font-bold">{stat.label}</p>
+                </div>
+              ))}
+            </div>
+            {renderCourseGrid(MOCK_COURSES, "Recently Enrolled Courses")}
+          </div>
+        );
+      case View.PLAYER: return renderPlayer();
+      case View.ENROLLED: return renderCourseGrid(MOCK_COURSES, "My Enrolled Courses");
+      case View.WISHLIST: return renderCourseGrid(MOCK_COURSES.slice(0, 1), "My Wishlist");
+      case View.PROFILE:
+        const firstName = user.name.split(' ')[0];
+        const lastName = user.name.split(' ').slice(1).join(' ') || 'Richard';
+        return (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h3 className="text-2xl font-black text-gray-900">My Profile</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-y-10 gap-x-12">
+              <div><p className="text-sm font-black text-gray-900">First Name</p><p className="text-sm font-bold text-gray-500 mt-1">{firstName}</p></div>
+              <div><p className="text-sm font-black text-gray-900">Last Name</p><p className="text-sm font-bold text-gray-500 mt-1">{lastName}</p></div>
+              <div><p className="text-sm font-black text-gray-900">Registration Date</p><p className="text-sm font-bold text-gray-500 mt-1">16 Jan 2024, 11:15 AM</p></div>
+              <div><p className="text-sm font-black text-gray-900">Email</p><p className="text-sm font-bold text-gray-500 mt-1">{user.email}</p></div>
+            </div>
+            <div className="pt-6 border-t border-gray-50"><p className="text-sm font-black text-gray-900">Bio</p><p className="text-sm font-bold text-gray-500 mt-3 leading-relaxed">I'm passionate about developing software solutions.</p></div>
+          </div>
+        );
+      case View.CERTIFICATES:
+        return (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6 animate-in fade-in duration-500">
+            <h3 className="text-2xl font-black text-gray-900">My Certificates</h3>
+            <div className="space-y-4">
+              {[ {id: '1', title: 'React.js Pro Mastery', date: 'Feb 15, 2025'} ].map(cert => (
+                <div key={cert.id} className="flex items-center justify-between p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                  <div><h4 className="font-black text-gray-900">{cert.title}</h4><p className="text-xs font-bold text-gray-400">Awarded on {cert.date}</p></div>
+                  <button className="px-6 py-2 bg-[#ff536a] text-white rounded-xl text-xs font-bold shadow-lg shadow-pink-100">Download PDF</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      case View.ORDERS:
+        return (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-in fade-in duration-500">
+            <div className="p-8 border-b border-gray-50"><h3 className="text-2xl font-black text-gray-900">Order History</h3></div>
+            <table className="w-full text-left">
+              <thead className="bg-gray-50 text-gray-400 uppercase text-[10px] font-black tracking-widest border-b border-gray-50">
+                <tr><th className="px-8 py-4">Course</th><th className="px-8 py-4">Date</th><th className="px-8 py-4">Amount</th><th className="px-8 py-4">Status</th></tr>
+              </thead>
+              <tbody className="text-sm font-bold text-gray-600">
+                <tr className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="px-8 py-6">Pro Course Batch 11</td><td className="px-8 py-6">Jan 10, 2025</td><td className="px-8 py-6 text-[#ff536a]">$99</td><td className="px-8 py-6"><span className="px-3 py-1 bg-green-50 text-green-600 rounded-full text-[10px] font-black uppercase">Paid</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        );
+      case View.QUIZZES:
+        return (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6 animate-in fade-in duration-500">
+            <h3 className="text-2xl font-black text-gray-900">My Quiz Attempts</h3>
+            <div className="space-y-4">
+              {[ { title: 'Orientation Quiz', date: 'Jan 12, 2025', score: '8/10', status: 'Passed' } ].map((q, i) => (
+                <div key={i} className="flex items-center justify-between p-6 bg-gray-50 rounded-2xl">
+                  <div><h4 className="font-black text-gray-900">{q.title}</h4><p className="text-xs font-bold text-gray-400">Attempted on {q.date}</p></div>
+                  <div className="flex items-center gap-6">
+                    <div className="text-right"><p className="text-lg font-black text-gray-900">{q.score}</p><p className="text-[10px] font-black text-green-500 uppercase">{q.status}</p></div>
+                    <button className="text-[#ff536a] font-black text-xs hover:underline">Details</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      case View.REVIEWS:
+        return (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6 animate-in fade-in duration-500">
+            <h3 className="text-2xl font-black text-gray-900">My Reviews</h3>
+            <div className="space-y-6">
+              {[ { course: 'Pro Course Batch 11', rating: 5, comment: 'Excellent course material!' } ].map((r, i) => (
+                <div key={i} className="p-6 border border-gray-50 rounded-2xl space-y-3">
+                   <div className="flex items-center justify-between">
+                     <h4 className="font-black text-gray-900">{r.course}</h4>
+                     <div className="flex gap-1 text-[#ffc107]">{Array.from({length: r.rating}).map((_, i) => <svg key={i} className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>)}</div>
+                   </div>
+                   <p className="text-sm font-medium text-gray-500">"{r.comment}"</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f7f8fa] flex flex-col">
+      <main className="max-w-7xl mx-auto w-full px-6 md:px-12 py-12">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {renderSidebar()}
+          <div className="lg:col-span-9 space-y-8">{renderContent()}</div>
+        </div>
       </main>
+      <footer className="bg-white border-t border-gray-100 pt-20 mt-auto">
+        <div className="max-w-7xl mx-auto px-6 md:px-12 grid grid-cols-1 md:grid-cols-4 gap-12 pb-16">
+          <div className="space-y-6"><Logo /><p className="text-sm text-gray-400 font-medium">Platform designed to help learners manage, deliver, and track learning activities.</p></div>
+          <div className="space-y-6"><h4 className="text-lg font-black text-[#2d1b69]">Quick Links</h4><ul className="space-y-3 text-sm font-bold text-gray-500"><li className="hover:text-[#ff536a] cursor-pointer" onClick={() => setCurrentView(View.ENROLLED)}>My Courses</li><li className="hover:text-[#ff536a] cursor-pointer" onClick={() => setCurrentView(View.PROFILE)}>Profile</li></ul></div>
+          <div className="space-y-6"><h4 className="text-lg font-black text-[#2d1b69]">Support</h4><ul className="space-y-3 text-sm font-bold text-gray-500"><li>Contact: support@dreamslms.com</li><li>Help Center</li></ul></div>
+          <div className="space-y-6"><h4 className="text-lg font-black text-[#2d1b69]">Newsletter</h4><div className="relative"><input type="text" placeholder="Your email" className="w-full bg-white border border-gray-200 rounded-xl px-4 py-4 pr-12 text-sm outline-none focus:border-[#ff536a] text-black" /></div></div>
+        </div>
+        <div className="bg-[#2d1b69] py-6 text-center text-white text-xs font-bold uppercase tracking-widest"><p>© 2025 DreamsLMS. All rights reserved.</p></div>
+      </footer>
     </div>
   );
 };
