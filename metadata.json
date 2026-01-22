@@ -1,0 +1,5 @@
+{
+  "name": "Lumina ELMS",
+  "description": "A cutting-edge Educational Learning Management System (ELMS) featuring AI-powered course summaries, automated quiz generation, and personalized learning paths using Gemini 3.",
+  "requestFramePermissions": []
+}
