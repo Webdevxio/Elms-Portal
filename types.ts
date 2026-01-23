@@ -40,10 +40,13 @@ export interface Course {
   id: string;
   title: string;
   instructor: string;
+  instructorAvatar?: string;
   thumbnail: string;
   modules: Module[];
   price?: string;
   category?: string;
+  rating?: number;
+  reviewsCount?: number;
 }
 
 export enum View {

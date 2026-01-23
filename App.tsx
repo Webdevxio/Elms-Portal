@@ -90,7 +90,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Sync state to local storage - FIXED LOGOUT BY ADDING ELSE BRANCH
+  // Sync state to local storage
   useEffect(() => {
     if (isLoggedIn) {
       localStorage.setItem('dreams_isLoggedIn', 'true');
@@ -400,14 +400,40 @@ const App: React.FC = () => {
       <h3 className="text-xl font-black text-gray-900">{title}</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         {courseList.map((course) => (
-          <div key={course.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group hover:shadow-xl transition-all">
-            <img src={course.thumbnail} className="w-full h-44 object-cover" alt={course.title} />
-            <div className="p-5 space-y-3">
-               <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 bg-gray-50 px-2 py-1 rounded">{course.instructor}</span>
-               <h4 className="text-sm font-black text-gray-900 leading-tight group-hover:text-[#ff536a] transition">{course.title}</h4>
-               <div className="flex items-center justify-between pt-2">
-                 <span className="text-[#ff536a] font-black">{course.price || '$99'}</span>
-                 <button onClick={() => handleViewCourse(course)} className="text-xs font-black bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-[#ff536a] transition">View Course</button>
+          <div key={course.id} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden group hover:shadow-xl transition-all relative flex flex-col">
+            <div className="relative aspect-video">
+              <img src={course.thumbnail} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={course.title} />
+              <button className="absolute top-4 right-4 w-8 h-8 bg-white/80 backdrop-blur rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 transition">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" /></svg>
+              </button>
+            </div>
+            <div className="p-6 flex flex-col flex-1 space-y-4">
+               <div className="flex items-center justify-between">
+                 <div className="flex items-center gap-2">
+                   <img src={course.instructorAvatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${course.instructor}`} className="w-6 h-6 rounded-full" alt="" />
+                   <span className="text-[10px] font-bold text-gray-500">{course.instructor}</span>
+                 </div>
+                 <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-100">{course.category}</span>
+               </div>
+               
+               <h4 className="text-sm font-black text-gray-900 leading-tight group-hover:text-[#ff536a] transition line-clamp-2 min-h-[2.5rem]">{course.title}</h4>
+               
+               <div className="flex items-center gap-1">
+                 <div className="flex text-yellow-400">
+                   {[...Array(5)].map((_, i) => (
+                     <svg key={i} className={`w-3 h-3 ${i < Math.floor(course.rating || 0) ? 'fill-current' : 'text-gray-200'}`} viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" /></svg>
+                   ))}
+                 </div>
+                 <span className="text-[10px] font-bold text-gray-900">{course.rating}</span>
+                 <span className="text-[10px] font-medium text-gray-400">({course.reviewsCount} Reviews)</span>
+               </div>
+
+               <div className="flex items-center justify-between pt-2 mt-auto">
+                 <span className="text-lg font-black text-[#ff536a]">{course.price}</span>
+                 <button onClick={() => handleViewCourse(course)} className="text-[10px] font-black bg-gray-900 text-white px-5 py-2.5 rounded-xl hover:bg-[#ff536a] transition flex items-center gap-2">
+                   View Course
+                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" /></svg>
+                 </button>
                </div>
             </div>
           </div>
